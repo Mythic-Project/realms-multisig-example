@@ -7,9 +7,10 @@ export async function createAndExecuteProposal(
     signerTwo: Signer,
     governance: Governance,
     connection: Connection,
-    membershipToken: PublicKey
+    membershipToken: PublicKey,
+    multisigName: string
 ) {
-    const realmAddress = governance.pda.realmAccount({name: "My Multi-sig Wallet"}).publicKey
+    const realmAddress = governance.pda.realmAccount({name: multisigName}).publicKey
     const governanceAddress = governance.pda.governanceAccount({realmAccount: realmAddress, seed: realmAddress}).publicKey
 
     const signerOneTokenOwnerRecord = governance.pda.tokenOwnerRecordAccount({
@@ -94,7 +95,15 @@ export async function createAndExecuteProposal(
         index: 0
     }).publicKey
 
+
+    const tx = new Transaction().add(proposalIx, insertIxIx, signOffProposalIx, voteIx)
+    // const sig = await sendAndConfirmTransaction(connection, tx, [signerOne])
+
+    // console.log("The proposal is successfully created and voted. Tx:", sig)
+
     // Execute the proposal (since 49% approval achieved)
+    sendSolIx.keys[0].isSigner = false
+
     const executeProposalIx = await governance.executeTransactionInstruction(
         governanceAddress,
         proposalAddress,
@@ -102,10 +111,12 @@ export async function createAndExecuteProposal(
         [{pubkey: sendSolIx.programId, isSigner: false, isWritable: false}, ...sendSolIx.keys]
     )
 
-    const tx = new Transaction().add(proposalIx, insertIxIx, signOffProposalIx, executeProposalIx)
-    const sig = sendAndConfirmTransaction(connection, tx, [signerOne])
+    await new Promise(resolve => setTimeout(resolve, 1000)) // add 1 sec delay before executing tx
 
-    console.log("0.10 SOL is successfully withdrawn from the multisig wallet. Tx:", sig)
+    const executeTx = new Transaction().add(executeProposalIx)
+    // const executeSig = await sendAndConfirmTransaction(connection, executeTx, [signerOne])
+
+    // console.log("0.10 SOL is successfully withdrawn from the multisig wallet. Tx:", executeSig)
 }
 
 // Helper function
@@ -117,6 +128,6 @@ async function depositSol(signerOne: Signer, multiSigWallet: PublicKey, connecti
     })
 
     const tx = new Transaction().add(depositSolIx)
-    const sig = sendAndConfirmTransaction(connection, tx, [signerOne])
+    const sig = await sendAndConfirmTransaction(connection, tx, [signerOne])
     console.log("0.10 SOL deposited in the multi-sig wallet. Tx:", sig)
 }
