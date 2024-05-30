@@ -21,7 +21,7 @@ const signerThree = Keypair.generate();
     await airdrop(signerOne, connection)
     await airdrop(signerThree, connection)
        
-    const multiSigName = `My Multi-sig Wallet ${Math.floor(Math.random()*1000)}` // name must be unique 
+    const multiSigName = `My Multi-sig Wallet ${Math.floor(Math.random()*10000)}` // name must be unique 
     
     const membershipToken = await createMultisig(
         signerOne, 
