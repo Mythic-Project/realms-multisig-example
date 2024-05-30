@@ -1,4 +1,3 @@
-import { createAssociatedTokenAccountInstruction, createMintToInstruction, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { Connection, Keypair, PublicKey, Signer, Transaction, TransactionInstruction, sendAndConfirmTransaction } from "@solana/web3.js";
 import { Governance } from "test-governance-sdk";
 
@@ -53,15 +52,13 @@ export async function addAndRemoveMembers(
         multiSigWallet
     )
 
-    const signerThreeAta = getAssociatedTokenAddressSync(membershipToken, signerThree.publicKey)
-
     const addNewSignerIx = await governance.depositGoverningTokensInstruction(
         realmAddress,
         membershipToken,
         membershipToken,
         signerThree.publicKey,
         multiSigWallet,
-        signerOne.publicKey,
+        multiSigWallet,
         1
     )
 
@@ -73,7 +70,7 @@ export async function addAndRemoveMembers(
 
     // Insert remove member ix and add member ix in the proposal
     const insertIxIx = await governance.insertTransactionInstruction(
-        [removeSignerIx],
+        [removeSignerIx, addNewSignerIx],
         0, 0, 0,
         governanceAddress,
         proposalAddress,
@@ -122,27 +119,26 @@ export async function addAndRemoveMembers(
     console.log("The proposal is successfully voted. Tx:", sig2)
 
     // Execute the proposal (since 49% approval achieved)
+    removeSignerIx.keys[4].isSigner = false
+    addNewSignerIx.keys[4].isSigner = false
+    addNewSignerIx.keys[6].isSigner = false
+
     const executeProposalIx = await governance.executeTransactionInstruction(
         governanceAddress,
         proposalAddress,
         proposalTransactionAccount,
-        [{pubkey: removeSignerIx.programId, isSigner: false, isWritable: false}, ...removeSignerIx.keys]
+        [
+            {pubkey: removeSignerIx.programId, isSigner: false, isWritable: false},
+            ...removeSignerIx.keys,            
+            {pubkey: addNewSignerIx.programId, isSigner: false, isWritable: false},
+            ...addNewSignerIx.keys, 
+        ]
     )
 
     await new Promise(resolve => setTimeout(resolve, 2000)) // add 1 sec delay before executing tx
-
-    console.log(executeProposalIx.keys)
-    console.log(executeProposalIx.keys.map(k => k.pubkey.toBase58()))
-    
+        
     const executeTx = new Transaction().add(executeProposalIx)
-    const executeSig = await sendAndConfirmTransaction(connection, executeTx, [signerOne])
+    const executeSig = await sendAndConfirmTransaction(connection, executeTx, [signerThree])
 
     console.log("Successfully added and removed signers. Tx:", executeSig)
-}   
-
-// Helper functions
-function getKeysForExecuteIx(ix: TransactionInstruction) {
-    const returnIx = {...ix}
-    returnIx.keys = returnIx.keys.map(key => ({...key, isSigner: false}))
-    return [{pubkey: returnIx.programId, isSigner: false, isWritable: false}, ...returnIx.keys]
 }

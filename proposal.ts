@@ -1,4 +1,4 @@
-import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, Signer, SystemProgram, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
+import { Connection, LAMPORTS_PER_SOL, PublicKey, Signer, SystemProgram, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
 import { Governance } from "test-governance-sdk";
 
 
@@ -97,9 +97,9 @@ export async function createAndExecuteProposal(
 
 
     const tx = new Transaction().add(proposalIx, insertIxIx, signOffProposalIx, voteIx)
-    // const sig = await sendAndConfirmTransaction(connection, tx, [signerOne])
+    const sig = await sendAndConfirmTransaction(connection, tx, [signerOne])
 
-    // console.log("The proposal is successfully created and voted. Tx:", sig)
+    console.log("The proposal is successfully created and voted. Tx:", sig)
 
     // Execute the proposal (since 49% approval achieved)
     sendSolIx.keys[0].isSigner = false
@@ -114,9 +114,9 @@ export async function createAndExecuteProposal(
     await new Promise(resolve => setTimeout(resolve, 1000)) // add 1 sec delay before executing tx
 
     const executeTx = new Transaction().add(executeProposalIx)
-    // const executeSig = await sendAndConfirmTransaction(connection, executeTx, [signerOne])
+    const executeSig = await sendAndConfirmTransaction(connection, executeTx, [signerOne])
 
-    // console.log("0.10 SOL is successfully withdrawn from the multisig wallet. Tx:", executeSig)
+    console.log("0.10 SOL is successfully withdrawn from the multisig wallet. Tx:", executeSig)
 }
 
 // Helper function
@@ -124,10 +124,10 @@ async function depositSol(signerOne: Signer, multiSigWallet: PublicKey, connecti
     const depositSolIx = SystemProgram.transfer({
         fromPubkey: signerOne.publicKey,
         toPubkey: multiSigWallet,
-        lamports: 0.1 * LAMPORTS_PER_SOL // 0.10 SOL deposited to the multisig
+        lamports: 0.15 * LAMPORTS_PER_SOL // 0.10 SOL deposited to the multisig
     })
 
     const tx = new Transaction().add(depositSolIx)
     const sig = await sendAndConfirmTransaction(connection, tx, [signerOne])
-    console.log("0.10 SOL deposited in the multi-sig wallet. Tx:", sig)
+    console.log("0.15 SOL deposited in the multi-sig wallet. Tx:", sig)
 }

@@ -1,6 +1,6 @@
-import { Connection, Signer, PublicKey, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
+import { Connection, Signer, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
 import { Governance, GovernanceConfig } from "test-governance-sdk";
-import { AuthorityType, createAssociatedTokenAccountInstruction, createMint, createMintToInstruction, createSetAuthorityInstruction, getAssociatedTokenAddressSync, mintTo } from "@solana/spl-token";
+import { AuthorityType, createMint, createSetAuthorityInstruction } from "@solana/spl-token";
 
 export async function createMultisig(
     signerOne: Signer,
