@@ -1,130 +1,152 @@
-import { Connection, Signer, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
+import {
+  Connection,
+  Signer,
+  Transaction,
+  sendAndConfirmTransaction,
+} from "@solana/web3.js";
 import { Governance, GovernanceConfig } from "test-governance-sdk";
-import { AuthorityType, createMint, createSetAuthorityInstruction } from "@solana/spl-token";
+import {
+  AuthorityType,
+  createMint,
+  createSetAuthorityInstruction,
+} from "@solana/spl-token";
+
+import { BN } from "bn.js";
+
+export const DISABLED_VOTER_WEIGHT = new BN("18446744073709551615");
 
 export async function createMultisig(
-    signerOne: Signer,
-    signerTwo: Signer,
-    governance: Governance,
-    connection: Connection,
-    multisigName: string
+  signerOne: Signer,
+  signerTwo: Signer,
+  governance: Governance,
+  connection: Connection,
+  multisigName: string
 ) {
-    // Create a new token (to be used for multisig membership)
-    const membershipToken = await createToken(signerOne, connection)
-    const placeholderToken = await createToken(signerOne, connection)
+  // Create a new token to be used for multisig membership
+  const membershipToken = await createToken(signerOne, connection);
 
-    // Initiate a new Realm (as a multi-sig)
-    const createMultsigIx = await governance.createRealmInstruction(
-        multisigName,
-        placeholderToken, // community token (will not be used)
-        1,
-        signerOne.publicKey,
-        undefined,
-        membershipToken,
-        "dormant",
-        "membership"
-    )
-    
-    // Initiate governance for the new multsig (1-of-2 multi-sig)
-    const governanceConfig: GovernanceConfig = {
-        communityVoteThreshold: {disabled: {}},
-        minCommunityWeightToCreateProposal: 1,
-        minTransactionHoldUpTime: 0,
-        votingBaseTime: 86400,
-        communityVoteTipping: {disabled: {}},
-        councilVoteThreshold: {yesVotePercentage: [49]},
-        councilVetoVoteThreshold: {disabled: {}},
-        minCouncilWeightToCreateProposal: 1,
-        councilVoteTipping: {early: {}},
-        communityVetoVoteThreshold: {disabled: {}},
-        votingCoolOffTime: 0,
-        depositExemptProposalCount: 15
-    }
+  // The recovery/community token will be disabled by default but can be activated
+  // to provide recovery/supervisory functionality
+  const recoveryToken = await createToken(signerOne, connection);
 
-    const realmAddress = governance.pda.realmAccount({name: multisigName}).publicKey
-    const governanceSeed = realmAddress // Optional: any seed can be used to randomize governance address, herein realmAddress used as a seed too
-        
-    const createGovIx = await governance.createGovernanceInstruction(
-        governanceConfig,
-        realmAddress,
-        signerOne.publicKey,
-        undefined,
-        signerOne.publicKey,
-        governanceSeed
-    )
+  // Initiate a new Realm (as a multi-sig)
+  const createMultisigIx = await governance.createRealmInstruction(
+    multisigName,
+    recoveryToken,
+    DISABLED_VOTER_WEIGHT,
+    signerOne.publicKey,
+    undefined,
+    membershipToken,
+    "dormant",
+    "membership"
+  );
 
-    const governanceAddress = governance.pda.governanceAccount({realmAccount: realmAddress, seed: realmAddress}).publicKey
-    
-    // Initiate Treasury for the multisig
-    const createTreasuryIx = await governance.createNativeTreasuryInstruction(
-        governanceAddress,
-        signerOne.publicKey
-    )
+  // Initiate governance for the new multisig (1-of-2 multi-sig)
+  const governanceConfig: GovernanceConfig = {
+    communityVoteThreshold: { disabled: {} },
+    minCommunityWeightToCreateProposal: DISABLED_VOTER_WEIGHT,
+    minTransactionHoldUpTime: 0,
+    votingBaseTime: 86400, // In seconds == 1
+    communityVoteTipping: { disabled: {} },
+    councilVoteThreshold: { yesVotePercentage: [49] }, // Approval quorum
+    councilVetoVoteThreshold: { disabled: {} },
+    minCouncilWeightToCreateProposal: 1,
+    councilVoteTipping: { early: {} },
+    communityVetoVoteThreshold: { disabled: {} },
+    votingCoolOffTime: 0,
+    depositExemptProposalCount: 254,
+  };
 
-    // Deposit Tokens in the multisig (to get the voting power)
-    const depositForSignerOneIx = await governance.depositGoverningTokensInstruction(
-        realmAddress,
-        membershipToken,
-        membershipToken,
-        signerOne.publicKey,
-        signerOne.publicKey,
-        signerOne.publicKey,
-        1
-    )
+  const realmAddress = governance.pda.realmAccount({
+    name: multisigName,
+  }).publicKey;
+  const governanceSeed = realmAddress; // Optional: any seed can be used to randomize governance address, herein realmAddress used as a seed too
 
-    const depositForSignerTwoIx = await governance.depositGoverningTokensInstruction(
-        realmAddress,
-        membershipToken,
-        membershipToken,
-        signerTwo.publicKey,
-        signerOne.publicKey,
-        signerOne.publicKey,
-        1
-    )
+  const createGovIx = await governance.createGovernanceInstruction(
+    governanceConfig,
+    realmAddress,
+    signerOne.publicKey,
+    undefined,
+    signerOne.publicKey,
+    governanceSeed
+  );
 
-    // Transfer the authority of the multisig to governance 
-    const setMultisigAuthorityIx = await governance.setRealmAuthorityInstruction(
-        realmAddress,
-        signerOne.publicKey,
-        "setChecked",
-        governanceAddress
-    )
+  const governanceAddress = governance.pda.governanceAccount({
+    realmAccount: realmAddress,
+    seed: governanceSeed,
+  }).publicKey;
 
-    // Transfer the mint authority to multisig
-    const transferMintAuthIx = createSetAuthorityInstruction(
-        membershipToken,
-        signerOne.publicKey,
-        AuthorityType.MintTokens,
-        governance.pda.nativeTreasuryAccount({governanceAccount: governanceAddress}).publicKey
-    )
+  // Initiate Treasury for the multisig
+  const createTreasuryIx = await governance.createNativeTreasuryInstruction(
+    governanceAddress,
+    signerOne.publicKey
+  );
 
-    const tx = new Transaction().add(
-        createMultsigIx, 
-        createGovIx, 
-        createTreasuryIx, 
-        depositForSignerOneIx, 
-        depositForSignerTwoIx,
-        setMultisigAuthorityIx,
-        transferMintAuthIx
-    )
+  // Deposit Tokens in the multisig (to get the voting power)
+  const depositForSignerOneIx =
+    await governance.depositGoverningTokensInstruction(
+      realmAddress,
+      membershipToken,
+      membershipToken,
+      signerOne.publicKey,
+      signerOne.publicKey,
+      signerOne.publicKey,
+      1
+    );
 
-    const txSignature = await sendAndConfirmTransaction(connection, tx, [signerOne, signerTwo])
+  const depositForSignerTwoIx =
+    await governance.depositGoverningTokensInstruction(
+      realmAddress,
+      membershipToken,
+      membershipToken,
+      signerTwo.publicKey,
+      signerOne.publicKey,
+      signerOne.publicKey,
+      1
+    );
 
-    console.log("The multisig is successfully created. Tx: ", txSignature)
+  // Transfer the authority of the multisig to governance
+  const setMultisigAuthorityIx = await governance.setRealmAuthorityInstruction(
+    realmAddress,
+    signerOne.publicKey,
+    "setChecked",
+    governanceAddress
+  );
 
-    return membershipToken
+  // Transfer the mint authority to multisig
+  const transferMintAuthIx = createSetAuthorityInstruction(
+    membershipToken,
+    signerOne.publicKey,
+    AuthorityType.MintTokens,
+    governance.pda.nativeTreasuryAccount({
+      governanceAccount: governanceAddress,
+    }).publicKey
+  );
+
+  const tx = new Transaction().add(
+    createMultisigIx,
+    createGovIx,
+    createTreasuryIx,
+    depositForSignerOneIx,
+    depositForSignerTwoIx,
+    setMultisigAuthorityIx,
+    transferMintAuthIx
+  );
+
+  const txSignature = await sendAndConfirmTransaction(connection, tx, [
+    signerOne,
+    signerTwo,
+  ]);
+
+  console.log("The multisig is successfully created. Tx: ", txSignature);
+
+  return membershipToken;
 }
 
 // Helper functions
 async function createToken(signer: Signer, connection: Connection) {
-    const token = await createMint(
-        connection,
-        signer,
-        signer.publicKey,
-        signer.publicKey,
-        0
-    )
+  const token = await createMint(connection, signer, signer.publicKey, null, 0);
 
-    console.log("The token is successfully created!", token.toBase58())
-    return token
+  console.log("The token is successfully created!", token.toBase58());
+  return token;
 }
