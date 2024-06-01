@@ -11,27 +11,27 @@ npm run test
 
 1. Create an spl-governance instance:
 ```
-import { Governance } from "test-governance-sdk";
+import { SplGovernance } from "governance-idl-sdk";
 import { Connection } from "@solana/web3.js";
 
 const connection = new Connection("RPC_ENDPOINT");
-const governance = new Governance(connection);
+const splGovernance = new SplGovernance(connection);
 ```
 
 2. Fetching spl-governance data:
 ```
 // Fetch all Realms accounts (v2)
-const realms = await governance.getAllRealms()
+const realms = await splGovernance.getAllRealms()
 
 // Fetch proposal from its public key
 const proposalAddress = new PublicKey("4HxrP3R6A6GcUv62VHG331gwJKNhrqHKF438oRztzz2r")
-const proposal = await governance.getProposalByPubkey(proposalAddress)
+const proposal = await splGovernance.getProposalByPubkey(proposalAddress)
 ```
 
 3. Creating spl-governance instructions:
 ```
 // Create a new Realm instruction
- const createMultsigIx = await governance.createRealmInstruction(
+ const createMultsigIx = await splGovernance.createRealmInstruction(
     multisigName,
     communityToken,
     1,
@@ -43,7 +43,7 @@ const proposal = await governance.getProposalByPubkey(proposalAddress)
 )
 
 // Deposit governing tokens instruction
-const depositForSignerTwoIx = await governance.depositGoverningTokensInstruction(
+const depositForSignerTwoIx = await splGovernance.depositGoverningTokensInstruction(
     realmAddress,
     communityToken,
     depositorAta,
@@ -56,8 +56,8 @@ const depositForSignerTwoIx = await governance.depositGoverningTokensInstruction
 4. Working with spl-governance PDAs
 ```
 // Derive Realm Address
-const realmAddress = governance.pda.realmAccount({name: multisigName}).publicKey
+const realmAddress = splGovernance.pda.realmAccount({name: multisigName}).publicKey
 
 // Derive Governance address
-const governanceAddress = governance.pda.governanceAccount({realmAccount: realmAddress, seed: governanceSeed}).publicKey
+const governanceAddress = splGovernance.pda.governanceAccount({realmAccount: realmAddress, seed: governanceSeed}).publicKey
 ```
