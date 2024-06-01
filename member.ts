@@ -1,144 +1,72 @@
-import { Connection, Keypair, PublicKey, Signer, Transaction, TransactionInstruction, sendAndConfirmTransaction } from "@solana/web3.js";
-import { Governance } from "test-governance-sdk";
+import { Connection, PublicKey, Signer, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
+import { SplGovernance } from "governance-idl-sdk";
 
-
-export async function addAndRemoveMembers(
-    connection: Connection,
-    governance: Governance,
+export async function addInitialMember(
+    splGovernance: SplGovernance,
+    realmAddress: PublicKey,
     membershipToken: PublicKey,
-    multisigName: string,
-    signerOne: Signer,
-    signerTwo: Signer,
-    signerThree: Signer
+    signer: Signer,
+    payer: Signer,
+    connection: Connection
 ) {
-    const realmAddress = governance.pda.realmAccount({name: multisigName}).publicKey
-    const governanceAddress = governance.pda.governanceAccount({realmAccount: realmAddress, seed: realmAddress}).publicKey
-    const multiSigWallet = governance.pda.nativeTreasuryAccount({governanceAccount: governanceAddress}).publicKey
-
-    const signerOneTokenOwnerRecord = governance.pda.tokenOwnerRecordAccount({
-        realmAccount: realmAddress, 
-        governingTokenMintAccount: membershipToken,
-        governingTokenOwner: signerOne.publicKey
-    })
-
-    const signerTwoTokenOwnerRecord = governance.pda.tokenOwnerRecordAccount({
-        realmAccount: realmAddress, 
-        governingTokenMintAccount: membershipToken,
-        governingTokenOwner: signerTwo.publicKey
-    })
-
-    const proposalSeed = Keypair.generate().publicKey // random seed
-
-    const addRemoveMemberProposalIx = await governance.createProposalInstruction(
-        "And and Remove Signers",
-        "This proposal removes Signer Two and adds Signer Three",
-        {choiceType: "single", multiChoiceOptions: null},
-        ["Approve"],
-        true,
+    // Deposit Tokens in the multisig (to get the voting power)
+    const depositForSignerIx =
+        await splGovernance.depositGoverningTokensInstruction(
         realmAddress,
-        governanceAddress,
-        signerOneTokenOwnerRecord.publicKey,
         membershipToken,
-        signerOne.publicKey,
-        signerOne.publicKey,
-        proposalSeed
-    )
+        membershipToken,
+        signer.publicKey,
+        payer.publicKey,
+        payer.publicKey,
+        1
+    );
 
-    const removeSignerIx = await governance.revokeGoverningTokensInstruction(
+    const addSignerTx = new Transaction().add(depositForSignerIx);
+
+    const addSignerSig = await sendAndConfirmTransaction(
+        connection, 
+        addSignerTx, [
+        payer,
+        signer
+    ]);
+
+    console.log(
+        `Signer ${signer.publicKey.toBase58()} is added to the multisig. Tx: `,
+        addSignerSig
+    );
+}
+
+export async function removeMember(
+    splGovernance: SplGovernance,
+    realmAddress: PublicKey,
+    membershipToken: PublicKey,
+    tokenOwnerRecord: PublicKey,
+    multiSigWallet: PublicKey,
+) {
+    return await splGovernance.revokeGoverningTokensInstruction(
         1,
         realmAddress,
-        signerTwoTokenOwnerRecord.publicKey,
+        tokenOwnerRecord,
         membershipToken,
         multiSigWallet
     )
+}
 
-    const addNewSignerIx = await governance.depositGoverningTokensInstruction(
+export async function addSubsequentMember(
+    splGovernance: SplGovernance,
+    realmAddress: PublicKey,
+    membershipToken: PublicKey,
+    signer: PublicKey,
+    multiSigWallet: PublicKey,
+    payer: PublicKey
+) {
+    return await splGovernance.depositGoverningTokensInstruction(
         realmAddress,
         membershipToken,
         membershipToken,
-        signerThree.publicKey,
+        signer,
         multiSigWallet,
-        multiSigWallet,
+        payer,
         1
     )
-
-    const proposalAddress = governance.pda.proposalAccount({
-        governanceAccount: governanceAddress,
-        governingTokenMint: membershipToken,
-        proposalSeed
-    }).publicKey
-
-    // Insert remove member ix and add member ix in the proposal
-    const insertIxIx = await governance.insertTransactionInstruction(
-        [removeSignerIx, addNewSignerIx],
-        0, 0, 0,
-        governanceAddress,
-        proposalAddress,
-        signerOneTokenOwnerRecord.publicKey,
-        signerOne.publicKey,
-        signerOne.publicKey
-    )
-
-    // Sign off the proposal
-    const signOffProposalIx = await governance.signOffProposalInstruction(
-        realmAddress,
-        governanceAddress,
-        proposalAddress,
-        signerOne.publicKey,
-        undefined,
-        signerOneTokenOwnerRecord.publicKey
-    )
-
-     // Vote on the proposal from Signer One's wallet
-     const voteIx = await governance.castVoteInstruction(
-        {approve: [[{rank: 0, weightPercentage: 100}]]},
-        realmAddress,
-        governanceAddress,
-        proposalAddress,
-        signerOneTokenOwnerRecord.publicKey,
-        signerOneTokenOwnerRecord.publicKey,
-        signerOne.publicKey,
-        membershipToken,
-        signerOne.publicKey
-    )
-
-    const proposalTransactionAccount = governance.pda.proposalTransactionAccount({
-        proposal: proposalAddress,
-        optionIndex: 0,
-        index: 0
-    }).publicKey
-
-    const tx = new Transaction().add(addRemoveMemberProposalIx)
-    const sig = await sendAndConfirmTransaction(connection, tx, [signerOne])
-
-    console.log("The proposal is successfully created. Tx:", sig)
-
-    const tx2 = new Transaction().add(insertIxIx, signOffProposalIx, voteIx)
-    const sig2 = await sendAndConfirmTransaction(connection, tx2, [signerOne])
-
-    console.log("The proposal is successfully voted. Tx:", sig2)
-
-    // Execute the proposal (since 49% approval achieved)
-    removeSignerIx.keys[4].isSigner = false
-    addNewSignerIx.keys[4].isSigner = false
-    addNewSignerIx.keys[6].isSigner = false
-
-    const executeProposalIx = await governance.executeTransactionInstruction(
-        governanceAddress,
-        proposalAddress,
-        proposalTransactionAccount,
-        [
-            {pubkey: removeSignerIx.programId, isSigner: false, isWritable: false},
-            ...removeSignerIx.keys,            
-            {pubkey: addNewSignerIx.programId, isSigner: false, isWritable: false},
-            ...addNewSignerIx.keys, 
-        ]
-    )
-
-    await new Promise(resolve => setTimeout(resolve, 2000)) // add 1 sec delay before executing tx
-        
-    const executeTx = new Transaction().add(executeProposalIx)
-    const executeSig = await sendAndConfirmTransaction(connection, executeTx, [signerThree])
-
-    console.log("Successfully added and removed signers. Tx:", executeSig)
 }

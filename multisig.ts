@@ -4,7 +4,7 @@ import {
   Transaction,
   sendAndConfirmTransaction,
 } from "@solana/web3.js";
-import { Governance, GovernanceConfig } from "test-governance-sdk";
+import { SplGovernance, GovernanceConfig } from "governance-idl-sdk";
 import {
   AuthorityType,
   createMint,
@@ -12,29 +12,32 @@ import {
 } from "@solana/spl-token";
 
 import { BN } from "bn.js";
+import { addInitialMember } from "./member";
 
 export const DISABLED_VOTER_WEIGHT = new BN("18446744073709551615");
 
 export async function createMultisig(
+  payer: Signer,
   signerOne: Signer,
   signerTwo: Signer,
-  governance: Governance,
+  signerThree: Signer,
+  splGovernance: SplGovernance,
   connection: Connection,
   multisigName: string
 ) {
   // Create a new token to be used for multisig membership
-  const membershipToken = await createToken(signerOne, connection);
+  const membershipToken = await createToken(payer, connection);
 
   // The recovery/community token will be disabled by default but can be activated
   // to provide recovery/supervisory functionality
-  const recoveryToken = await createToken(signerOne, connection);
+  const recoveryToken = await createToken(payer, connection);
 
   // Initiate a new Realm (as a multi-sig)
-  const createMultisigIx = await governance.createRealmInstruction(
+  const createMultisigIx = await splGovernance.createRealmInstruction(
     multisigName,
     recoveryToken,
     DISABLED_VOTER_WEIGHT,
-    signerOne.publicKey,
+    payer.publicKey,
     undefined,
     membershipToken,
     "dormant",
@@ -48,67 +51,84 @@ export async function createMultisig(
     minTransactionHoldUpTime: 0,
     votingBaseTime: 86400, // In seconds == 1
     communityVoteTipping: { disabled: {} },
-    councilVoteThreshold: { yesVotePercentage: [49] }, // Approval quorum
+    councilVoteThreshold: { yesVotePercentage: [60] }, // Approval quorum
     councilVetoVoteThreshold: { disabled: {} },
     minCouncilWeightToCreateProposal: 1,
-    councilVoteTipping: { early: {} },
+    councilVoteTipping: { strict: {} },
     communityVetoVoteThreshold: { disabled: {} },
     votingCoolOffTime: 0,
     depositExemptProposalCount: 254,
   };
 
-  const realmAddress = governance.pda.realmAccount({
+  const realmAddress = splGovernance.pda.realmAccount({
     name: multisigName,
   }).publicKey;
   const governanceSeed = realmAddress; // Optional: any seed can be used to randomize governance address, herein realmAddress used as a seed too
 
-  const createGovIx = await governance.createGovernanceInstruction(
+  const createGovIx = await splGovernance.createGovernanceInstruction(
     governanceConfig,
     realmAddress,
-    signerOne.publicKey,
+    payer.publicKey,
     undefined,
-    signerOne.publicKey,
+    payer.publicKey,
     governanceSeed
   );
 
-  const governanceAddress = governance.pda.governanceAccount({
+  const governanceAddress = splGovernance.pda.governanceAccount({
     realmAccount: realmAddress,
     seed: governanceSeed,
   }).publicKey;
 
   // Initiate Treasury for the multisig
-  const createTreasuryIx = await governance.createNativeTreasuryInstruction(
+  const createTreasuryIx = await splGovernance.createNativeTreasuryInstruction(
     governanceAddress,
-    signerOne.publicKey
+    payer.publicKey
   );
 
-  // Deposit Tokens in the multisig (to get the voting power)
-  const depositForSignerOneIx =
-    await governance.depositGoverningTokensInstruction(
-      realmAddress,
-      membershipToken,
-      membershipToken,
-      signerOne.publicKey,
-      signerOne.publicKey,
-      signerOne.publicKey,
-      1
-    );
+  const createMultisigTx = new Transaction().add(
+    createMultisigIx,
+    createGovIx,
+    createTreasuryIx,
+  );
 
-  const depositForSignerTwoIx =
-    await governance.depositGoverningTokensInstruction(
-      realmAddress,
-      membershipToken,
-      membershipToken,
-      signerTwo.publicKey,
-      signerOne.publicKey,
-      signerOne.publicKey,
-      1
-    );
+  const txSignature = await sendAndConfirmTransaction(connection, createMultisigTx, [
+    payer
+  ]);
+
+  console.log("The multisig is successfully created. Tx: ", txSignature);
+
+  // Add signers to the multisig
+  await addInitialMember(
+    splGovernance,
+    realmAddress,
+    membershipToken,
+    signerOne,
+    payer,
+    connection
+  ) // Signer One
+
+  await addInitialMember(
+    splGovernance,
+    realmAddress,
+    membershipToken,
+    signerTwo,
+    payer,
+    connection
+  ) // Signer Two
+
+  await addInitialMember(
+    splGovernance,
+    realmAddress,
+    membershipToken,
+    signerThree,
+    payer,
+    connection
+  ) // Signer Three
 
   // Transfer the authority of the multisig to governance
-  const setMultisigAuthorityIx = await governance.setRealmAuthorityInstruction(
+  const setMultisigAuthorityIx = await splGovernance.setRealmAuthorityInstruction(
     realmAddress,
-    signerOne.publicKey,
+    payer.publicKey,
     "setChecked",
     governanceAddress
   );
@@ -116,31 +136,29 @@ export async function createMultisig(
   // Transfer the mint authority to multisig
   const transferMintAuthIx = createSetAuthorityInstruction(
     membershipToken,
-    signerOne.publicKey,
+    payer.publicKey,
     AuthorityType.MintTokens,
-    governance.pda.nativeTreasuryAccount({
+    splGovernance.pda.nativeTreasuryAccount({
       governanceAccount: governanceAddress,
     }).publicKey
   );
 
-  const tx = new Transaction().add(
-    createMultisigIx,
-    createGovIx,
-    createTreasuryIx,
-    depositForSignerOneIx,
-    depositForSignerTwoIx,
-    setMultisigAuthorityIx,
-    transferMintAuthIx
+  const transferAuthTx = new Transaction().add(
+    transferMintAuthIx,
+    setMultisigAuthorityIx
   );
 
-  const txSignature = await sendAndConfirmTransaction(connection, tx, [
-    signerOne,
-    signerTwo,
+  const transferTxSignature = await sendAndConfirmTransaction(connection, transferAuthTx, [
+    payer
   ]);
 
-  console.log("The multisig is successfully created. Tx: ", txSignature);
+  console.log("The authority of multisig and membership token is transferred. Tx: ", transferTxSignature);
 
-  return membershipToken;
+  return {
+    membershipToken,
+    realmAddress,
+    governanceAddress
+  }
 }
 
 // Helper functions
