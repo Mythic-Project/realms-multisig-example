@@ -12,7 +12,7 @@ import {
 } from "@solana/spl-token";
 
 import { BN } from "bn.js";
-import { addInitialMember } from "./member";
+import { addInitialMultisigMember } from "./member";
 
 export const DISABLED_VOTER_WEIGHT = new BN("18446744073709551615");
 
@@ -44,15 +44,18 @@ export async function createMultisig(
     "membership"
   );
 
-  // Initiate governance for the new multisig (1-of-2 multi-sig)
+  // Initiate governance for the new multisig (2-of-3 multi-sig)
   const governanceConfig: GovernanceConfig = {
     communityVoteThreshold: { disabled: {} },
     minCommunityWeightToCreateProposal: DISABLED_VOTER_WEIGHT,
     minTransactionHoldUpTime: 0,
-    votingBaseTime: 86400, // In seconds == 1
+    // In seconds == 1 day, max time for approving transactions
+    votingBaseTime: 86400,
     communityVoteTipping: { disabled: {} },
-    councilVoteThreshold: { yesVotePercentage: [60] }, // Approval quorum
+    // Approval quorum 60% = 2 of 3 to approve transactions
+    councilVoteThreshold: { yesVotePercentage: [60] },
     councilVetoVoteThreshold: { disabled: {} },
+    // Anybody from the multisig can propose transactions
     minCouncilWeightToCreateProposal: 1,
     councilVoteTipping: { strict: {} },
     communityVetoVoteThreshold: { disabled: {} },
@@ -88,50 +91,53 @@ export async function createMultisig(
   const createMultisigTx = new Transaction().add(
     createMultisigIx,
     createGovIx,
-    createTreasuryIx,
+    createTreasuryIx
   );
 
-  const txSignature = await sendAndConfirmTransaction(connection, createMultisigTx, [
-    payer
-  ]);
+  const txSignature = await sendAndConfirmTransaction(
+    connection,
+    createMultisigTx,
+    [payer]
+  );
 
   console.log("The multisig is successfully created. Tx: ", txSignature);
 
   // Add signers to the multisig
-  await addInitialMember(
+  await addInitialMultisigMember(
     splGovernance,
     realmAddress,
     membershipToken,
     signerOne,
     payer,
     connection
-  ) // Signer One
+  ); // Signer One
 
-  await addInitialMember(
+  await addInitialMultisigMember(
     splGovernance,
     realmAddress,
     membershipToken,
     signerTwo,
     payer,
     connection
-  ) // Signer Two
+  ); // Signer Two
 
-  await addInitialMember(
+  await addInitialMultisigMember(
     splGovernance,
     realmAddress,
     membershipToken,
     signerThree,
     payer,
     connection
-  ) // Signer Three
+  ); // Signer Three
 
   // Transfer the authority of the multisig to governance
-  const setMultisigAuthorityIx = await splGovernance.setRealmAuthorityInstruction(
-    realmAddress,
-    payer.publicKey,
-    "setChecked",
-    governanceAddress
-  );
+  const setMultisigAuthorityIx =
+    await splGovernance.setRealmAuthorityInstruction(
+      realmAddress,
+      payer.publicKey,
+      "setChecked",
+      governanceAddress
+    );
 
   // Transfer the mint authority to multisig
   const transferMintAuthIx = createSetAuthorityInstruction(
@@ -148,17 +154,22 @@ export async function createMultisig(
     setMultisigAuthorityIx
   );
 
-  const transferTxSignature = await sendAndConfirmTransaction(connection, transferAuthTx, [
-    payer
-  ]);
+  const transferTxSignature = await sendAndConfirmTransaction(
+    connection,
+    transferAuthTx,
+    [payer]
+  );
 
-  console.log("The authority of multisig and membership token is transferred. Tx: ", transferTxSignature);
+  console.log(
+    "The authority of multisig and membership token is transferred. Tx: ",
+    transferTxSignature
+  );
 
   return {
     membershipToken,
     realmAddress,
-    governanceAddress
-  }
+    governanceAddress,
+  };
 }
 
 // Helper functions
